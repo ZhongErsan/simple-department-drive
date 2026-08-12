@@ -1,0 +1,56 @@
+server:
+  port: ${SERVER_PORT:8082}
+
+spring:
+  application:
+    name: simple-department-drive
+  datasource:
+    url: ${DB_URL:jdbc:mysql://localhost:3306/simple_drive?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false}
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:123}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 50MB
+  sql:
+    init:
+      mode: never
+  jackson:
+    default-property-inclusion: non_null
+    time-zone: Asia/Shanghai
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+
+app:
+  jwt:
+    secret: ${JWT_SECRET:c2ltcGxlLWRlcGFydG1lbnQtZHJpdmUtZGV2LXNlY3JldC1rZXktMjAyNi0wMS0wMQ==}
+    expiration-seconds: ${JWT_EXPIRATION_SECONDS:86400}
+  demo-data-enabled: ${DEMO_DATA_ENABLED:true}
+
+storage:
+  root-path: ${STORAGE_ROOT:./storage}
+  max-file-size: 52428800
+  cleanup:
+    enabled: ${STORAGE_CLEANUP_ENABLED:true}
+
+    # 只处理超过1小时的文件，防止误删正在上传或正在提交事务的文件
+    orphan-min-age: ${STORAGE_ORPHAN_MIN_AGE:PT1H}
+
+    # 每轮最多处理100个文件或任务
+    batch-size: ${STORAGE_CLEANUP_BATCH_SIZE:100}
+
+    # 删除失败后的首次重试间隔
+    retry-base-delay: ${STORAGE_CLEANUP_RETRY_BASE_DELAY:PT1M}
+
+    # 指数退避的最大间隔:PT1M  = 1分钟
+    retry-max-delay: ${STORAGE_CLEANUP_RETRY_MAX_DELAY:PT1H}
+
+    # 应用启动1分钟后开始执行
+    initial-delay-ms: ${STORAGE_CLEANUP_INITIAL_DELAY_MS:60000}
+
+    # 每轮结束5分钟后执行下一轮
+    scan-delay-ms: ${STORAGE_CLEANUP_SCAN_DELAY_MS:300000}

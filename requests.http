@@ -1,0 +1,69 @@
+@baseUrl = http://localhost:8081
+@token = 把登录响应中的token粘贴到这里
+
+### 健康测试
+GET {{baseUrl}}/api/test
+
+### 管理员登录
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "username": "admin",
+  "password": "admin123"
+}
+
+### 普通成员登录
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "username": "member",
+  "password": "123456"
+}
+
+### 查看可见根目录
+GET {{baseUrl}}/api/folders?parentId=0
+Authorization: Bearer {{token}}
+
+### 创建子文件夹
+POST {{baseUrl}}/api/folders
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "parentId": 4,
+  "folderName": "Java学习"
+}
+
+### 查看目录文件
+GET {{baseUrl}}/api/files?folderId=4
+Authorization: Bearer {{token}}
+
+### 新增部门（管理员）
+POST {{baseUrl}}/api/departments
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "departmentName": "宣传部"
+}
+
+### 新增用户（管理员）
+POST {{baseUrl}}/api/users
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "username": "student01",
+  "password": "123456",
+  "realName": "学生一",
+  "role": "MEMBER",
+  "departmentId": 1
+}
+
+# 上传请使用 Apifox/Postman：
+# POST /api/files/upload
+# multipart/form-data:
+# folderId = 文件夹ID
+# file = 本地文件
