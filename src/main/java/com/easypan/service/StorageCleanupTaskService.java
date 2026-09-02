@@ -83,7 +83,7 @@ public class StorageCleanupTaskService {
                         // 兜底排序：时间相同，按id从小到大，保证排序结果稳定不变
                         .orderByAsc(StorageCleanupTask::getId)
                         //只一次性取出最多 safeBatchSize 条清理任务批量处理
-                        .last("LIMIT" + safeBatchSize)
+                        .last("LIMIT " + safeBatchSize)
         );
     }
 

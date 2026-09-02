@@ -18,5 +18,8 @@ export const userApi = {
   },
   disable(id) {
     return http.delete(`/users/${id}`)
+  },
+  enable(id){
+    return http.put(`/users/${id}/enable`)
   }
 }

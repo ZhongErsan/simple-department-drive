@@ -60,4 +60,9 @@ public class UserController {
         userService.disable(id);
         return Result.success("用户已禁用");
     }
+    @PutMapping("/{id}/enable")
+    public Result<Void> enable(@PathVariable Long id){
+        userService.enable(id);
+        return Result.success("用户已启用");
+    }
 }

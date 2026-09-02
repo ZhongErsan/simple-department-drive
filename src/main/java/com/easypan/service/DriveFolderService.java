@@ -15,7 +15,6 @@ import com.easypan.model.enums.DataStatus;
 import com.easypan.model.vo.FolderView;
 import com.easypan.model.vo.TrashFolderView;
 import lombok.RequiredArgsConstructor;
-import org.apache.xmlbeans.impl.store.Cur;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -46,7 +45,6 @@ public class DriveFolderService {
     public List<FolderView> listChildren(Long parentId) {
         // 获取当前登录用户信息
         CurrentUser user = UserContext.require();
-
         // 如果不是根目录，校验父文件夹查看权限
         if (parentId != 0L) {
             DriveFolder parent = getActive(parentId);
@@ -76,7 +74,7 @@ public class DriveFolderService {
     public FolderView create(CreateFolderRequest request) {
         CurrentUser user = UserContext.require();
         // 查询父文件夹，校验文件夹存在且未被删除
-        DriveFolder parent = getActive(request.parentId());
+        DriveFolder parent = getActiveForUpdate(request.parentId());
         // 校验用户是否拥有在该父目录创建文件夹的权限
         permissionService.checkCanCreateFolder(user, parent);
 
@@ -101,7 +99,7 @@ public class DriveFolderService {
             folderMapper.insert(folder);
         } catch (DuplicateKeyException e) {
             //不需要捕获所有异常，直接向上抛出
-            throw new BusinessException(409, "同级目录下已存在同名文件夹" + e);
+            throw new BusinessException(409, "同级目录下已存在同名文件夹");
         }
         return toView(folder);
     }
@@ -125,18 +123,21 @@ public class DriveFolderService {
         permissionService.checkCanCreateFolder(user, folder);
 
         String folderName = normalizeName(request.folderName());
+
         // 前置查重：排除自身ID，防止和同级其他文件夹重名
         ensureNoDuplicate(folder.getParentId(), folderName, id);
         folder.setFolderName(folderName);
         folder.setUpdatedAt(LocalDateTime.now());
         //重命名时捕获唯一键异常
         try {
-            folderMapper.updateById(folder);
+            int affected=folderMapper.updateById(folder);
+            if(affected!=1){
+                throw new BusinessException(500,"文件夹重命名失败");
+            }
         } catch (DuplicateKeyException e) {
             throw new BusinessException(
                     409,
-                    "同级目录下已存在同名文件夹" + e
-            );
+                    "同级目录下已存在同名文件夹" );
         }
         return toView(folder);
     }
@@ -149,7 +150,7 @@ public class DriveFolderService {
     @Transactional
     public void delete(Long id) {
         CurrentUser user = UserContext.require();
-        DriveFolder folder = getActive(id);
+        DriveFolder folder = getActiveForUpdate(id);
         // 根目录禁止删除
         if (folder.getParentId() == 0L) {
             throw new BusinessException("系统根文件夹不能删除");
@@ -187,14 +188,25 @@ public class DriveFolderService {
         DriveFolder folder = getDeleted(id);
         permissionService.checkCanDeleteFolder(user, folder);
         //父目录必须仍然正常存在
-        DriveFolder parent = getActive(folder.getParentId());
+        DriveFolder parent = getActiveForUpdate(folder.getParentId());
         permissionService.checkCanCreateFolder(user, parent);
         //同目录里不能存在同名文件夹
         ensureNoDuplicate(folder.getParentId(), folder.getFolderName(), folder.getId());
         folder.setStatus(DataStatus.ACTIVE.name());
         folder.setDeletedAt(null);
         folder.setUpdatedAt(LocalDateTime.now());
-        folderMapper.updateById(folder);
+        try {
+            int affected = folderMapper.updateById(folder);
+
+            if (affected != 1) {
+                throw new BusinessException(500, "文件夹恢复失败");
+            }
+        } catch (DuplicateKeyException e) {
+            throw new BusinessException(
+                    409,
+                    "源目录已经存在同名文件夹，无法恢复"
+            );
+        }
         return toView(folder);
     }
 
@@ -235,7 +247,14 @@ public class DriveFolderService {
         }
         return folder;
     }
-
+    //加行锁
+    public DriveFolder getActiveForUpdate(Long id){
+        DriveFolder folder=folderMapper.selectActiveByIdForUpdate(id);
+        if(folder==null){
+            throw new BusinessException(400,"文件夹不存在");
+        }
+        return folder;
+    }
     /**
      * 校验同级目录不存在同名文件夹
      *

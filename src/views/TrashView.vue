@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, ref } from 'vue'
+import { onMounted,reactive, ref } from 'vue'
 import {
   RefreshLeft,
   DeleteFilled,
@@ -12,7 +12,12 @@ import { fileApi } from '../api/files'
 import { folderApi } from '../api/folders'
 import { formatBytes, formatDate, areaLabel } from '../utils/format'
 import { getErrorMessage } from '../utils/http'
+const fileTotal = ref(0)
 
+const filePage = reactive({
+  pageNum: 1,
+  pageSize: 20
+})
 const loading = ref(false)
 const activeTab = ref('files')
 const deletedFiles = ref([])
@@ -22,11 +27,21 @@ async function load() {
   loading.value = true
   try {
     const [filesResult, foldersResult] = await Promise.all([
-      fileApi.trash(),
+      fileApi.trash({
+        pageNum: filePage.pageNum,
+        pageSize: filePage.pageSize
+      }),
       folderApi.trash()
     ])
-    deletedFiles.value = filesResult.data || []
-    deletedFolders.value = foldersResult.data || []
+
+    deletedFiles.value =
+        filesResult.data?.records || []
+
+    fileTotal.value =
+        filesResult.data?.total || 0
+
+    deletedFolders.value =
+        foldersResult.data || []
   } catch (error) {
     if (!error.__handled) {
       ElMessage.error(getErrorMessage(error, '回收站加载失败'))
@@ -34,6 +49,10 @@ async function load() {
   } finally {
     loading.value = false
   }
+}
+function handleFilePageChange(pageNum) {
+  filePage.pageNum = pageNum
+  load()
 }
 
 async function restoreFile(file) {
@@ -100,7 +119,7 @@ onMounted(load)
     <div class="panel trash-panel" v-loading="loading">
       <el-tabs v-model="activeTab">
         <el-tab-pane
-          :label="`文件 (${deletedFiles.length})`"
+          :label="`文件 (${fileTotal})`"
           name="files"
         >
           <el-table :data="deletedFiles">
@@ -149,6 +168,16 @@ onMounted(load)
               </template>
             </el-table-column>
           </el-table>
+          <el-pagination
+              v-if="fileTotal > filePage.pageSize"
+              background
+              layout="prev, pager, next"
+              :current-page="filePage.pageNum"
+              :page-size="filePage.pageSize"
+              :total="fileTotal"
+              @current-change="handleFilePageChange"
+          />
+
         </el-tab-pane>
 
         <el-tab-pane

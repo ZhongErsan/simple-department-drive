@@ -136,8 +136,7 @@ const editForm = reactive({
   realName: '',
   role: 'MEMBER',
   departmentId: null,
-  quotaGb: 10,
-  status: 'ACTIVE'
+  quotaGb: 10
 })
 
 function openEdit(user) {
@@ -146,8 +145,7 @@ function openEdit(user) {
     realName: user.realName,
     role: user.role,
     departmentId: user.departmentId,
-    quotaGb: bytesToGb(user.quotaBytes),
-    status: user.status
+    quotaGb: bytesToGb(user.quotaBytes)
   })
   editDialog.value = true
 }
@@ -171,7 +169,6 @@ async function updateUser() {
           ? null
           : editForm.departmentId,
       role: editForm.role,
-      status: editForm.status,
       quotaBytes: gbToBytes(editForm.quotaGb)
     })
     ElMessage.success('用户修改成功')
@@ -238,13 +235,7 @@ async function disableUser(user) {
 
 async function enableUser(user) {
   try {
-    await userApi.update(user.id, {
-      realname: user.realName,
-      departmentId: user.departmentId,
-      role: user.role,
-      status: 'ACTIVE',
-      quotaBytes: user.quotaBytes
-    })
+    await userApi.enable(user.id)
     ElMessage.success('用户已启用，需要重新登录')
     await load()
   } catch (error) {

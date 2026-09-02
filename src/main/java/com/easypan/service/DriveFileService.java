@@ -18,7 +18,6 @@ import com.easypan.storage.LocalStorageService;
 import com.easypan.storage.StorageProperties;
 import com.easypan.storage.StoredFile;
 import lombok.RequiredArgsConstructor;
-import org.springframework.cglib.core.Local;
 import org.springframework.core.io.Resource;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
@@ -65,6 +64,7 @@ public class DriveFileService {
         String extension = extractExtension(originalName);
         //上传校验
         String detectedContentType = fileMimeTypeService.detectAndValidate(file, extension);
+        //性能优化、快速失败
         Long duplicateCount = fileMapper.selectCount(
                 new LambdaQueryWrapper<DriveFile>()
                         .eq(DriveFile::getFolderId, folderId)
@@ -87,15 +87,21 @@ public class DriveFileService {
          */
         boolean cleanupCallbackRegistered= transactionFileCleanupRegistrar.registerRollbackCleanup(storedFile.storagePath());
         try {
+            //真正写入数据库前重新锁定目标文件夹
+            //防止上传过程中该文件夹被并发删除
+            DriveFolder lockedFolder=folderService.getActiveForUpdate(folderId);
+            //锁定后重新校验一次权限
+            permissionService.checkCanUpload(user,lockedFolder);
+
             //占用配额空间
             //必须放进 try 内。否则配额不足时不会执行磁盘清理。
-            quotaService.consume(folder, storedFile.size());
+            quotaService.consume(lockedFolder, storedFile.size());
             LocalDateTime now = LocalDateTime.now();
             DriveFile entity = new DriveFile();
-            entity.setDepartmentId(folder.getDepartmentId());
-            entity.setFolderId(folder.getId());
+            entity.setDepartmentId(lockedFolder.getDepartmentId());
+            entity.setFolderId(lockedFolder.getId());
             entity.setUploaderId(user.userId());
-            entity.setOwnerId(folder.getOwnerId() == null ? user.userId() : folder.getOwnerId());
+            entity.setOwnerId(lockedFolder.getOwnerId() == null ? user.userId() : lockedFolder.getOwnerId());
             entity.setStorageName(storedFile.storageName());
             entity.setOriginalName(originalName);
             entity.setStoragePath(storedFile.storagePath());
@@ -112,7 +118,7 @@ public class DriveFileService {
             return toView(entity);
         } catch (DuplicateKeyException e) {
             // 场景1：唯一索引冲突，同目录同名文件
-            BusinessException conflict = new BusinessException(409, "当前文件夹已存在同名文件" + e);
+            BusinessException conflict = new BusinessException(409, "当前文件夹已存在同名文件" );
             cleanupImmediatelyWhenNoTransaction(cleanupCallbackRegistered,storedFile,"UPLOAD_DUPLICATE_NAME");
             throw conflict;
 
@@ -180,9 +186,14 @@ public class DriveFileService {
         permissionService.checkCanDeleteFile(user,folder,file);
         String storagePath=file.getStoragePath();
         //先删除数据库记录
-        int affected=fileMapper.deleteById(fileId);
-        if(affected!=1)
-            throw new BusinessException(500,"永久删除文件失败");
+        int affected = fileMapper.deleteIfDeleted(fileId);
+
+        if (affected != 1) {
+            throw new BusinessException(
+                    409,
+                    "文件状态已变化，请刷新后重试"
+            );
+        }
         //数据库事务真正COMMIT后，再清理磁盘
         boolean registered= transactionFileCleanupRegistrar.registerAfterCommitCleanup(storagePath,"PERMANENT_DELETE");
         if(!registered)
@@ -193,7 +204,8 @@ public class DriveFileService {
         CurrentUser user=UserContext.require();
         DriveFile file=getDeleted(fileId);
         //源文件夹必须还存在
-        DriveFolder folder=folderService.getActive(file.getFolderId());
+        //锁住父目录，同目录下的上传、恢复、创建等操作都需要竞争这同一把父目录行锁
+        DriveFolder folder=folderService.getActiveForUpdate(file.getFolderId());
         //校验权限
         permissionService.checkCanDeleteFile(user,folder,file);
         //判断原位置是否已经出现同名文件
@@ -211,39 +223,52 @@ public class DriveFileService {
         file.setStatus(DataStatus.ACTIVE.name());
         file.setDeletedAt(null);
         file.setUpdatedAt(LocalDateTime.now());
-        int affected=fileMapper.updateById(file);
-        if(affected!=1)
-            throw new BusinessException(500,"文件恢复失败");
+        try {
+            int affected = fileMapper.updateById(file);
+
+            if (affected != 1) {
+                throw new BusinessException(
+                        500,
+                        "文件恢复失败"
+                );
+            }
+        } catch (DuplicateKeyException e) {
+            throw new BusinessException(
+                    409,
+                    "源目录已经存在同名文件，无法恢复"
+            );
+        }
         return toView(file);
     }
     //查询全部已删除文件
-    public List<TrashFileView> listTrash(){
-        CurrentUser user=UserContext.require();
-        List<DriveFile> files=fileMapper.selectList(
-                new LambdaQueryWrapper<DriveFile>()
-                        .eq(DriveFile::getStatus,DataStatus.DELETED.name())
-                        .eq(DriveFile::getUploaderId,user.userId())
-                        .orderByDesc(DriveFile::getDeletedAt)
-                        .orderByDesc(DriveFile::getId)
+    public PageResult<TrashFileView> listTrash(
+            long pageNum,
+            long pageSize
+    ) {
+        CurrentUser user = UserContext.require();
+
+        var filePage = fileMapper.selectTrashPage(
+                new Page<>(pageNum, pageSize),
+                user.userId(),
+                user.departmentId(),
+                user.role().name()
         );
-        return convertToTrashViews(files);
+
+        List<TrashFileView> records =
+                convertToTrashViews(filePage.getRecords());
+
+        return new PageResult<>(
+                filePage.getCurrent(),
+                filePage.getSize(),
+                filePage.getTotal(),
+                filePage.getPages(),
+                records
+        );
     }
 
-    private boolean canManageDeletedFile(CurrentUser user, DriveFile file) {
-        DriveFolder folder=folderService.getById(file.getFolderId());
-        if(folder==null)
-            return false;
-        try{
-            permissionService.checkCanDeleteFile(user,folder,file);
-            return true;
-        }catch (BusinessException e){
-            return false;
-        }
-    }
 
     /**
      * 正常情况下，事务回滚回调负责删除物理文件。
-     *
      * 这里只处理没有经过Spring事务代理、
      * 因而没有注册到事务同步的兜底场景。
      */

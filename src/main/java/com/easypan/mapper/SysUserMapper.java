@@ -47,7 +47,6 @@ public interface SysUserMapper extends BaseMapper<SysUser> {
             SET real_name = #{realName},
                 role = #{role},
                 department_id = #{departmentId},
-                status = #{status},
                 quota_bytes = #{quotaBytes},
                 updated_at = #{updatedAt}
             WHERE id = #{id}
@@ -58,11 +57,18 @@ public interface SysUserMapper extends BaseMapper<SysUser> {
             @Param("realName") String realName,
             @Param("role") String role,
             @Param("departmentId") Long departmentId,
-            @Param("status") String status,
             @Param("quotaBytes") Long quotaBytes,
             @Param("updatedAt") LocalDateTime updatedAt
     );
 
+    @Update("""
+            UPDATE sys_user
+            SET status='ACTIVE',
+                current_session_id=null,
+                updated_at=NOW(6)
+            WHERE id=#{userId}
+            """)
+    int enabledAndClearSession(@Param("userId") Long userId);
     //登录时替换sessionID
     @Update("""
             UPDATE sys_user
@@ -88,6 +94,7 @@ public interface SysUserMapper extends BaseMapper<SysUser> {
             @Param("userId") Long userId,
             @Param("sessionId") String sessionId
     );
+
     //重置密码
     @Update("""
             UPDATE sys_user
@@ -100,6 +107,7 @@ public interface SysUserMapper extends BaseMapper<SysUser> {
             @Param("userId") Long userId,
             @Param("password") String password
     );
+
     //禁用用户
     @Update("""
             UPDATE sys_user

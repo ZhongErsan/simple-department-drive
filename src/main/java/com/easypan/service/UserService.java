@@ -129,7 +129,6 @@ public class UserService {
         requireAdmin();
         SysUser user = getRequired(id);
         Role role = parseRole(request.role());
-        DataStatus status = parseUserStatus(request.status());
         validateDepartment(role, request.departmentId());
         LocalDateTime now = LocalDateTime.now();
         int affectedRows = userMapper.updateUserConditionally(
@@ -137,7 +136,6 @@ public class UserService {
                 request.realname(),
                 role.name(),
                 request.departmentId(),
-                status.name(),
                 request.quotaBytes(),
                 now
         );
@@ -188,7 +186,15 @@ public class UserService {
         if(affectedRows!=1)
             throw new BusinessException(500,"禁用用户失败");
     }
-
+    @Transactional
+    public void enable(Long id){
+        requireAdmin();
+        getRequired(id);
+        int affectedRows=userMapper.enabledAndClearSession(id);
+        if(affectedRows!=1){
+            throw new BusinessException(500,"启用用户失败");
+        }
+    }
     private void migratePersonalDepartment(
             Long ownerId,
             Long newDepartmentId

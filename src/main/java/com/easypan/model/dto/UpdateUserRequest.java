@@ -12,8 +12,6 @@ public record UpdateUserRequest(
         Long departmentId,
         @NotBlank(message = "角色不能为空")
         String role,
-        @NotBlank(message = "状态不能为空")
-        String status,
         @NotNull(message = "个人配额不能为空")
         @Positive(message = "个人配额必须大于0")
         Long quotaBytes

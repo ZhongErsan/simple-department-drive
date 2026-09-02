@@ -29,8 +29,8 @@ export const fileApi = {
   remove(id) {
     return http.delete(`/files/${id}`)
   },
-  trash() {
-    return http.get('/files/trash')
+  trash(params) {
+    return http.get('/files/trash',{params})
   },
   restore(id) {
     return http.put(`/files/${id}/restore`)

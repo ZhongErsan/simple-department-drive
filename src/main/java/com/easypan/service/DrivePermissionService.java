@@ -78,7 +78,7 @@ public class DrivePermissionService {
                 && user.userId().equals(file.getUploaderId())) {
             return;
         }
-        throw new BusinessException(403,"无权删除该文件夹");
+        throw new BusinessException(403,"无权删除该文件");
     }
 
     private boolean sameDepartment(CurrentUser user, DriveFolder folder) {

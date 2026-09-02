@@ -23,4 +23,5 @@ public class DriveFolder {
 
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+    private String activeFolderName;
 }

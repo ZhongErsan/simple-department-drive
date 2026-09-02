@@ -3,6 +3,7 @@ package com.easypan.mapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.easypan.model.entity.DriveFolder;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
 import java.time.LocalDateTime;
@@ -20,5 +21,13 @@ public interface DriveFolderMapper extends BaseMapper<DriveFolder> {
             @Param("newDepartmentId") Long newDepartmentId,
             @Param("updatedAt") LocalDateTime updatedAt
     );
+    @Select("""
+            SELECT *
+            FROM drive_folder
+            WHERE id=#{id}
+                AND status='ACTIVE'
+            FOR UPDATE
+            """)
+    DriveFolder selectActiveByIdForUpdate(@Param("id") Long id);
 
 }

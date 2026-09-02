@@ -83,8 +83,19 @@ public class FileController {
     }
     //回收站
     @GetMapping("/trash")
-    public Result<List<TrashFileView>> trash(){
-        return Result.success(fileService.listTrash());
+    public Result<PageResult<TrashFileView>> trash(
+            @RequestParam(defaultValue = "1")
+            @Min(value = 1, message = "页码不能小于1")
+            long pageNum,
+
+            @RequestParam(defaultValue = "20")
+            @Min(value = 1, message = "每页数量不能小于1")
+            @Max(value = 100, message = "每页数量不能超过100")
+            long pageSize
+    ) {
+        return Result.success(
+                fileService.listTrash(pageNum, pageSize)
+        );
     }
     //恢复
     @PutMapping("/{id}/restore")
