@@ -478,26 +478,6 @@ POST   /api/departments
 PUT    /api/departments/{id}
 DELETE /api/departments/{id}
 ```
-
-------------------------------------------------------------------------
-
-## 本地运行
-
-当前提供的源码包中未包含构建文件与数据库建表脚本，因此 README 不写死具体
-Maven / npm 脚本名称。将本文件放入完整仓库后，可按仓库实际的
-`pom.xml`、`package.json` 和 SQL 初始化脚本执行。
-
-启动前至少需要：
-
-1.  准备 MySQL 数据库 `simple_drive` 并完成表结构初始化。
-2.  配置 `DB_URL / DB_USERNAME / DB_PASSWORD`。
-3.  配置安全的 `JWT_SECRET`。
-4.  确认 `STORAGE_ROOT` 指向可读写目录。
-5.  启动 Spring Boot 后端。
-6.  配置前端 `VITE_API_BASE_URL`，启动 Vue 前端。
-
-如果前后端通过开发代理统一使用 `/api`，前端无需额外修改 Axios 基础地址。
-
 ------------------------------------------------------------------------
 
 ## 测试
