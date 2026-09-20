@@ -1,5 +1,7 @@
 package com.easypan.auth;
 
+import com.easypan.cache.CacheProperties;
+import com.easypan.cache.RedisDataCacheService;
 import com.easypan.exception.BusinessException;
 import com.easypan.mapper.SysUserMapper;
 import com.easypan.model.dto.LoginRequest;
@@ -16,6 +18,10 @@ import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
+import java.time.Duration;
+import java.util.Objects;
+import java.util.concurrent.atomic.AtomicReference;
+
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -26,11 +32,26 @@ class SessionKickoutTest {
 
     private JwtService jwtService;
 
+    private LoginSessionService loginSessionService;
+
     private AuthService authService;
 
     private AuthInterceptor authInterceptor;
 
     private SysUser user;
+    private RedisDataCacheService cacheService;
+    private CacheProperties cacheProperties;
+
+    private LoginProtectionService loginProtectionService;
+
+    /**
+     * 用来模拟 Redis 中：
+     *
+     * simple-drive:auth:session:1
+     *
+     * 当前保存的 sessionId。
+     */
+    private AtomicReference<String> redisSession;
 
     @BeforeEach
     void setUp() {
@@ -38,9 +59,26 @@ class SessionKickoutTest {
         userMapper =
                 mock(SysUserMapper.class);
 
+        loginSessionService =
+                mock(LoginSessionService.class);
+
+        redisSession =
+                new AtomicReference<>();
+
         PasswordEncoder passwordEncoder =
                 new BCryptPasswordEncoder();
+        cacheService =
+                mock(RedisDataCacheService.class);
 
+        cacheProperties =
+                mock(CacheProperties.class);
+        loginProtectionService =
+                mock(LoginProtectionService.class);
+        when(
+                cacheProperties.authUserTtl()
+        ).thenReturn(
+                Duration.ofMinutes(2)
+        );
         /*
          * 至少32字节，
          * 满足HS256密钥长度要求。
@@ -51,84 +89,143 @@ class SessionKickoutTest {
                         3600
                 );
 
+        /*
+         * AuthService 现在需要 Redis Session Service。
+         */
         authService =
                 new AuthService(
                         userMapper,
                         passwordEncoder,
-                        jwtService
-                );
-
-        authInterceptor =
-                new AuthInterceptor(
                         jwtService,
-                        userMapper
+                        loginSessionService,
+                        cacheService,
+                        cacheProperties,
+                        loginProtectionService
                 );
 
         /*
-         * 模拟数据库中的用户。
+         * AuthInterceptor 现在也需要 Redis Session Service。
+         */
+        authInterceptor =
+                new AuthInterceptor(
+                        jwtService,
+                        userMapper,
+                        loginSessionService,
+                        cacheService,
+                        cacheProperties
+                );
+
+        /*
+         * 模拟数据库用户。
+         *
+         * 注意：
+         * currentSessionId 已经不需要了。
          */
         user = new SysUser();
 
         user.setId(1L);
         user.setUsername("member1");
+
         user.setPassword(
                 passwordEncoder.encode("123456")
         );
+
         user.setRealName("测试用户");
-        user.setRole(Role.MEMBER.name());
+
+        user.setRole(
+                Role.MEMBER.name()
+        );
+
         user.setDepartmentId(1L);
-        user.setStatus(DataStatus.ACTIVE.name());
+
+        user.setStatus(
+                DataStatus.ACTIVE.name()
+        );
 
         /*
-         * login查询用户名时，
-         * 返回这个模拟用户。
+         * 登录时根据 username 查询用户。
          */
         when(
                 userMapper.selectOne(any())
         ).thenReturn(user);
 
         /*
-         * AuthInterceptor根据userId查用户。
+         * AuthInterceptor Redis 校验通过之后，
+         * 根据 userId 查询用户。
          */
         when(
                 userMapper.selectById(1L)
         ).thenReturn(user);
 
+
         /*
-         * 模拟：
+         * ============================
+         * 模拟 Redis SET
+         * ============================
          *
-         * UPDATE sys_user
-         * SET current_session_id = ?
+         * loginSessionService.replaceSession(
+         *      userId,
+         *      sessionId
+         * )
          *
-         * 每次登录都覆盖user里的sessionId，
-         * 模拟真实数据库行为。
+         * 每次登录都会覆盖 Redis 中原来的 sessionId。
          */
         doAnswer(invocation -> {
 
-            String newSessionId =
+            String sessionId =
                     invocation.getArgument(1);
 
-            user.setCurrentSessionId(
-                    newSessionId
+            redisSession.set(
+                    sessionId
             );
 
-            return 1;
+            return null;
 
-        }).when(userMapper)
-                .replaceCurrentSession(
+        }).when(loginSessionService)
+                .replaceSession(
                         eq(1L),
                         anyString()
                 );
+
+
+        /*
+         * ============================
+         * 模拟 Redis GET + 比较
+         * ============================
+         *
+         * Redis 当前 sessionId
+         * ==
+         * JWT 中的 sessionId
+         *
+         * 才认为登录有效。
+         */
+        when(
+                loginSessionService.isCurrentSession(
+                        eq(1L),
+                        anyString()
+                )
+        ).thenAnswer(invocation -> {
+
+            String tokenSessionId =
+                    invocation.getArgument(1);
+
+            return Objects.equals(
+                    redisSession.get(),
+                    tokenSessionId
+            );
+        });
     }
+
 
     @AfterEach
     void tearDown() {
 
         /*
-         * 防止ThreadLocal污染其他测试。
+         * 防止 ThreadLocal 污染其他测试。
          */
         UserContext.clear();
     }
+
 
     @Test
     void secondLoginShouldKickFirstTokenOffline()
@@ -159,19 +256,27 @@ class SessionKickoutTest {
         String firstSessionId =
                 firstIdentity.sessionId();
 
-        assertNotNull(firstToken);
-        assertNotNull(firstSessionId);
+        assertNotNull(
+                firstToken
+        );
+
+        assertNotNull(
+                firstSessionId
+        );
+
 
         /*
-         * 第一次登录后：
+         * 第一次登录之后：
          *
-         * JWT.sid
-         * ==
-         * DB.current_session_id
+         * Redis:
+         *
+         * simple-drive:auth:session:1
+         * =
+         * firstSessionId
          */
         assertEquals(
                 firstSessionId,
-                user.getCurrentSessionId()
+                redisSession.get()
         );
 
 
@@ -200,26 +305,34 @@ class SessionKickoutTest {
         String secondSessionId =
                 secondIdentity.sessionId();
 
+
         /*
-         * 两次登录的sessionId一定不同。
+         * 每次登录都会生成新的 sessionId。
          */
         assertNotEquals(
                 firstSessionId,
                 secondSessionId
         );
 
+
         /*
-         * 数据库现在应该保存第二次登录的sessionId。
+         * Redis 中的旧 session 已经被覆盖。
+         *
+         * Redis:
+         *
+         * simple-drive:auth:session:1
+         * =
+         * secondSessionId
          */
         assertEquals(
                 secondSessionId,
-                user.getCurrentSessionId()
+                redisSession.get()
         );
 
 
         /*
          * ============================
-         * 使用第一次Token
+         * 使用第一次 Token 请求
          * ============================
          */
 
@@ -230,6 +343,7 @@ class SessionKickoutTest {
 
         MockHttpServletResponse response =
                 new MockHttpServletResponse();
+
 
         BusinessException exception =
                 assertThrows(
@@ -242,8 +356,17 @@ class SessionKickoutTest {
                                 )
                 );
 
+
         /*
-         * 第一次Token已经被第二次登录踢下线。
+         * 第一次 Token 中：
+         *
+         * sid = firstSessionId
+         *
+         * Redis 中：
+         *
+         * sid = secondSessionId
+         *
+         * 所以 Redis 校验失败。
          */
         assertEquals(
                 401,
@@ -251,14 +374,26 @@ class SessionKickoutTest {
         );
 
         assertEquals(
-                "账号已在其他设备登录，请重新登录",
+                "登录状态已失效，请重新登录",
                 exception.getMessage()
         );
 
 
         /*
+         * 很重要：
+         *
+         * Redis 校验失败之后，
+         * 不应该继续查 MySQL。
+         */
+        verify(
+                userMapper,
+                never()
+        ).selectById(1L);
+
+
+        /*
          * ============================
-         * 使用第二次Token
+         * 使用第二次 Token
          * ============================
          */
 
@@ -266,6 +401,7 @@ class SessionKickoutTest {
                 requestWithToken(
                         secondToken
                 );
+
 
         assertTrue(
                 authInterceptor.preHandle(
@@ -275,21 +411,35 @@ class SessionKickoutTest {
                 )
         );
 
+
         /*
-         * 第二次Token能够正确建立登录上下文。
+         * Redis 验证成功后，
+         * 才会查询数据库。
+         */
+        verify(
+                userMapper,
+                times(1)
+        ).selectById(1L);
+
+
+        /*
+         * 第二次 Token 能够正常建立 UserContext。
          */
         CurrentUser currentUser =
                 UserContext.require();
+
 
         assertEquals(
                 1L,
                 currentUser.userId()
         );
 
+
         assertEquals(
                 secondSessionId,
                 currentUser.sessionId()
         );
+
 
         /*
          * 模拟请求结束。
@@ -302,8 +452,9 @@ class SessionKickoutTest {
         );
     }
 
+
     /**
-     * 创建一个携带JWT的模拟HTTP请求。
+     * 创建携带 JWT 的模拟 HTTP 请求。
      */
     private MockHttpServletRequest requestWithToken(
             String token
@@ -312,7 +463,9 @@ class SessionKickoutTest {
         MockHttpServletRequest request =
                 new MockHttpServletRequest();
 
-        request.setMethod("GET");
+        request.setMethod(
+                "GET"
+        );
 
         request.addHeader(
                 "Authorization",

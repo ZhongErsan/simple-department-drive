@@ -102,8 +102,8 @@ public class FileMimeTypeService {
      * @throws BusinessException 415不支持的媒体类型 / 400检测异常
      */
     public String detectAndValidate(MultipartFile file, String extension) {
-        Set<String> allwedMimeTypes = ALLOWED_MIME_TYPES.get(extension);
-        if (allwedMimeTypes == null)
+        Set<String> allowedMimeTypes = ALLOWED_MIME_TYPES.get(extension);
+        if (allowedMimeTypes == null)
             throw new BusinessException(415, "不允许上传该文件类型");
 
         // 使用Tika读取二进制，获取文件真实MIME
@@ -116,7 +116,7 @@ public class FileMimeTypeService {
             throw new BusinessException(415,"无法识别文件真实类型");
         }
         // 关键校验：文件真实类型 和 后缀预期类型不匹配 → 判定为伪装文件，拒绝上传
-        if(!allwedMimeTypes.contains(detectedMimeType))
+        if(!allowedMimeTypes.contains(detectedMimeType))
             throw new BusinessException(415,"文件内容与扩展名不一致，检测类型为："+detectedMimeType);
         return detectedMimeType;
     }

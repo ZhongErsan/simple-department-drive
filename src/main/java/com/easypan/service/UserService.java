@@ -4,7 +4,12 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.easypan.auth.CurrentUser;
+import com.easypan.auth.LoginSessionService;
 import com.easypan.auth.UserContext;
+import com.easypan.cache.CacheInvalidationRegistrar;
+import com.easypan.cache.CacheKeys;
+import com.easypan.cache.CacheProperties;
+import com.easypan.cache.RedisDataCacheService;
 import com.easypan.exception.BusinessException;
 import com.easypan.mapper.DriveFileMapper;
 import com.easypan.mapper.DriveFolderMapper;
@@ -40,7 +45,10 @@ public class UserService {
     private final DriveFolderMapper driveFolderMapper;
     private final DriveFileMapper driveFileMapper;
     private final PasswordEncoder passwordEncoder;
-
+    private final LoginSessionService loginSessionService;
+    private final CacheInvalidationRegistrar cacheInvalidationRegistrar;
+    private final CacheProperties cacheProperties;
+    private final RedisDataCacheService cacheService;
     @Transactional
     public UserVO create(CreateUserRequest request) {
         requireAdmin();
@@ -115,12 +123,25 @@ public class UserService {
     @Transactional
     public UserVO get(Long id) {
         CurrentUser currentUser = UserContext.require();
-        SysUser target = getRequired(id);
+        //先查redis
+        String cacheKey= CacheKeys.userDetail(id);
+        UserVO target = cacheService.get(cacheKey,UserVO.class);
+        //如果redis没找到，再查询mysql
+        if(target==null){
+            SysUser user=userMapper.selectById(id);
+            if(user==null){
+                throw new BusinessException(404,"用户不存在");
+            }
+            target=toVO(user);
+            //mysql查询成功之后，写redis
+            cacheService.set(cacheKey,target,cacheProperties.userDetailTtl());
+        }
+
         boolean sameDepartmentMinister = currentUser.isMinister()
                 && currentUser.departmentId() != null
-                && currentUser.departmentId().equals(target.getDepartmentId());
-        if (currentUser.isAdmin() || currentUser.userId().equals(target.getId()) || sameDepartmentMinister)
-            return toVO(target);
+                && currentUser.departmentId().equals(target.departmentId());
+        if (currentUser.isAdmin() || currentUser.userId().equals(target.id()) || sameDepartmentMinister)
+            return target;
         throw new BusinessException(403, "无权查看该用户");
     }
 
@@ -129,6 +150,10 @@ public class UserService {
         requireAdmin();
         SysUser user = getRequired(id);
         Role role = parseRole(request.role());
+        //身份鉴权信息是否发生变更
+        boolean authInfoChanged=!Objects.equals(user.getRealName(),request.realname().trim())
+                ||!Objects.equals(user.getRole(),role.name())
+                ||!Objects.equals(user.getDepartmentId(),request.departmentId());
         validateDepartment(role, request.departmentId());
         LocalDateTime now = LocalDateTime.now();
         int affectedRows = userMapper.updateUserConditionally(
@@ -159,6 +184,11 @@ public class UserService {
         if (updatedUser.getDepartmentId() != null) {
             ensurePersonalRoot(updatedUser);
         }
+        //如果姓名、角色、部门变化，让当前session立即失效
+        if(authInfoChanged)
+            loginSessionService.invalidate(id);
+        //数据库事务commit成功之后，删除用户详情缓存
+        cacheInvalidationRegistrar.evictAfterCommit(CacheKeys.userDetail(id));
 
         return toVO(updatedUser);
     }
@@ -169,10 +199,14 @@ public class UserService {
         //先确认目标用户确实存在
         getRequired(id);
         String encodedPassword=passwordEncoder.encode(request.newPassword());
-        int affectedRows=userMapper.resetPasswordAndClearSession(id,encodedPassword);
+        int affectedRows=userMapper.resetPassword(id,encodedPassword);
         if(affectedRows!=1)
             throw new BusinessException(500,"密码重置失败");
-
+        //通过redis让旧登录失效
+        loginSessionService.invalidate(id);
+        cacheInvalidationRegistrar.evictAfterCommit(
+                CacheKeys.userDetail(id)
+        );
     }
 
     @Transactional
@@ -182,18 +216,26 @@ public class UserService {
         if (currentUser.userId().equals(id))
             throw new BusinessException(403, "不能禁用当前登录账号");
         getRequired(id);
-        int affectedRows=userMapper.disabledAndClearSession(id);
+        int affectedRows=userMapper.disabled(id);
         if(affectedRows!=1)
             throw new BusinessException(500,"禁用用户失败");
+        loginSessionService.invalidate(id);
+        cacheInvalidationRegistrar.evictAfterCommit(
+                CacheKeys.userDetail(id)
+        );
     }
     @Transactional
     public void enable(Long id){
         requireAdmin();
         getRequired(id);
-        int affectedRows=userMapper.enabledAndClearSession(id);
+        int affectedRows=userMapper.enabled(id);
         if(affectedRows!=1){
             throw new BusinessException(500,"启用用户失败");
         }
+        loginSessionService.invalidate(id);
+        cacheInvalidationRegistrar.evictAfterCommit(
+                CacheKeys.userDetail(id)
+        );
     }
     private void migratePersonalDepartment(
             Long ownerId,

@@ -64,46 +64,21 @@ public interface SysUserMapper extends BaseMapper<SysUser> {
     @Update("""
             UPDATE sys_user
             SET status='ACTIVE',
-                current_session_id=null,
                 updated_at=NOW(6)
             WHERE id=#{userId}
             """)
-    int enabledAndClearSession(@Param("userId") Long userId);
-    //登录时替换sessionID
-    @Update("""
-            UPDATE sys_user
-            SET current_session_id=#{sessionId},
-                updated_at=NOW(6)
-            WHERE id=#{userId}
-            AND status='ACTIVE'
-            """)
-    int replaceCurrentSession(
-            @Param("userId") Long userId,
-            @Param("sessionId") String sessionId
-    );
+    int enabled(@Param("userId") Long userId);
 
-    //logout时清空session
-    @Update("""
-            UPDATE sys_user
-            SET current_session_id=NULL,
-                updated_at=NOW(6)
-            WHERE id=#{userId}
-            AND current_session_id=#{sessionId}
-            """)
-    int clearCurrentSessionIfMatch(
-            @Param("userId") Long userId,
-            @Param("sessionId") String sessionId
-    );
+
 
     //重置密码
     @Update("""
             UPDATE sys_user
             SET password=#{password},
-                current_session_id=NULL,
                 updated_at=NOW(6)
             WHERE id=#{userId}
             """)
-    int resetPasswordAndClearSession(
+    int resetPassword(
             @Param("userId") Long userId,
             @Param("password") String password
     );
@@ -112,11 +87,10 @@ public interface SysUserMapper extends BaseMapper<SysUser> {
     @Update("""
             UPDATE sys_user
             SET status='DISABLED',
-                current_session_id=NULL,
                 updated_at=NOW(6)
             WHERE id=#{userId}
             """)
-    int disabledAndClearSession(@Param("userId") Long userId);
+    int disabled(@Param("userId") Long userId);
 
 
 }

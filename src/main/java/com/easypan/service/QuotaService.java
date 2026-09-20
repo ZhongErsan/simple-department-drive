@@ -1,5 +1,7 @@
 package com.easypan.service;
 
+import com.easypan.cache.CacheInvalidationRegistrar;
+import com.easypan.cache.CacheKeys;
 import com.easypan.exception.BusinessException;
 import com.easypan.mapper.SysDepartmentMapper;
 import com.easypan.mapper.SysUserMapper;
@@ -15,6 +17,7 @@ import org.springframework.stereotype.Service;
 public class QuotaService {
     private final SysUserMapper userMapper;
     private final SysDepartmentMapper departmentMapper;
+    private final CacheInvalidationRegistrar cacheInvalidationRegistrar;
 
     //占用存储空间配额
     public void consume(DriveFolder folder, long bytes) {
@@ -45,6 +48,9 @@ public class QuotaService {
         int affected=userMapper.releaseQuota(ownerId,bytes);
         if(affected!=1)
             throw new BusinessException(500,"个人配额释放失败");
+        cacheInvalidationRegistrar.evictAfterCommit(
+                CacheKeys.userDetail(ownerId)
+        );
     }
 
     //释放部门空间配额
@@ -52,6 +58,14 @@ public class QuotaService {
         int affected=departmentMapper.releaseQuota(folder.getDepartmentId(),bytes);
         if(affected!=1)
             throw new BusinessException(500,"部门配额释放失败");
+        cacheInvalidationRegistrar.evictAfterCommit(
+
+                CacheKeys.departmentDetail(
+                        folder.getDepartmentId()
+                ),
+
+                CacheKeys.DEPARTMENT_LIST
+        );
     }
 
     //参数校验：配额字节不能为负数
@@ -69,6 +83,9 @@ public class QuotaService {
         if (affected != 1) {
             throw new BusinessException(413, "个人空间配额不足");
         }
+        cacheInvalidationRegistrar.evictAfterCommit(
+                CacheKeys.userDetail(ownerId)
+        );
     }
 
     //占用部门空间配额
@@ -76,5 +93,13 @@ public class QuotaService {
         int affected = departmentMapper.tryConsumeQuota(folder.getDepartmentId(), bytes);
         if (affected != 1)
             throw new BusinessException(413, "部门空间配额不足");
+        cacheInvalidationRegistrar.evictAfterCommit(
+
+                CacheKeys.departmentDetail(
+                        folder.getDepartmentId()
+                ),
+
+                CacheKeys.DEPARTMENT_LIST
+        );
     }
 }

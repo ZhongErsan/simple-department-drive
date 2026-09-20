@@ -44,7 +44,6 @@ public interface DriveFileMapper extends BaseMapper<DriveFile> {
 
     /**
      * 查询仍被数据库引用的物理路径。
-     * <p>
      * 不限制 status。
      * 因为当前 DELETED 只是逻辑删除，物理文件仍然需要保留。
      */

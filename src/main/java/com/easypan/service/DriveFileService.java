@@ -47,7 +47,6 @@ public class DriveFileService {
     private final OrphanFileCleanupService orphanFileCleanupService;
     //配额
     private final QuotaService quotaService;
-    private final UserService userService;
 
     @Transactional
     public FileView upload(Long folderId, MultipartFile file) {

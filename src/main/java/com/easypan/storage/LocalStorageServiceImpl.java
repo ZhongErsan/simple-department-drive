@@ -88,8 +88,7 @@ public class LocalStorageServiceImpl implements LocalStorageService {
 
             // 将SHA256字节摘要转为小写十六进制字符串（固定64字符
             String sha256 = HexFormat.of().formatHex(messageDigest.digest());
-// 打印内部计算出来的值
-            System.out.println("方法内部计算sha = " + sha256);
+
             // 封装存储结果返回上层service
             return new StoredFile(storageName, relative, storedSize, sha256);
         } catch (IOException e) {

@@ -243,7 +243,7 @@ public class DriveFolderService {
                         .eq(DriveFolder::getStatus, DataStatus.ACTIVE.name())
         );
         if (folder == null) {
-            throw new BusinessException(400, "文件夹不存在");
+            throw new BusinessException(404, "文件夹不存在");
         }
         return folder;
     }
@@ -251,7 +251,7 @@ public class DriveFolderService {
     public DriveFolder getActiveForUpdate(Long id){
         DriveFolder folder=folderMapper.selectActiveByIdForUpdate(id);
         if(folder==null){
-            throw new BusinessException(400,"文件夹不存在");
+            throw new BusinessException(404,"文件夹不存在");
         }
         return folder;
     }
